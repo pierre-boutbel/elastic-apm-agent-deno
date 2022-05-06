@@ -1,6 +1,6 @@
 import { randomHex, safeEnv } from "./util.ts";
 
-export const APM_AGENT_VERSION = "0.0.12"; // TODO: automatically update with git tag/release
+export const APM_AGENT_VERSION = "0.0.13"; // TODO: automatically update with git tag/release
 
 function throwException(message: string): never {
   throw new Error(message);
@@ -254,16 +254,18 @@ export class ApmAgent {
   serverUrl: string;
   serviceName: string;
   nodeName?: string;
+  secretToken?: string;
   currentMetadata: ApmMetadata;
   loadMetricset?: () => Promise<ApmMetricset>;
 
   // deno-lint-ignore no-explicit-any
   _queue: Array<{ [msgType: string]: any }>;
 
-  constructor(serverUrl: string, serviceName: string, nodeName?: string) {
+  constructor(serverUrl: string, serviceName: string, nodeName?: string, secretToken?: string) {
     this.serverUrl = serverUrl;
     this.serviceName = serviceName;
     this.nodeName = nodeName;
+    this.secretToken = secretToken;
     this.currentMetadata = new ApmMetadata(this.serviceName, this.nodeName);
     this._queue = [];
   }
@@ -282,10 +284,15 @@ export class ApmAgent {
     if (this.loadMetricset) {
       messages.push({ "metricset": await this.loadMetricset() });
     }
+    
+    const headers = { "Content-Type": "application/x-ndjson" };
+    if (this.secretToken) {
+      headers['Authorization'] = `Bearer ${ this.secretToken }`;
+    }
 
     return fetch(`${this.serverUrl}/intake/v2/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-ndjson" },
+      headers,
       // deno-lint-ignore no-explicit-any
       body: messages.map((msg: any) => JSON.stringify(msg)).join("\n") + "\n",
     }).then(async (res) => {
@@ -314,6 +321,7 @@ export function registerAgent(
   url = "http://localhost:8200",
   serviceName?: string,
   nodeName?: string,
+  secretToken?: string
 ): ApmAgent {
   if (currentAgent) {
     return currentAgent;
@@ -326,6 +334,7 @@ export function registerAgent(
         "ELASTIC_APM_SERVICE_NAME environment variable is required but was empty",
       ),
     safeEnv("ELASTIC_APM_SERVICE_NODE_NAME") ?? nodeName,
+    safeEnv("ELASTIC_APM_SECRET_TOKEN") ?? secretToken,
   );
 
   updateInterval = setInterval(() => {
